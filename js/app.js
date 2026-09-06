@@ -1,6 +1,4 @@
 var hour = 0;
-var hourInterval = null; // 1 game hour == 86 rl seconds = 28 game seconds
-var jumpReady = false;
 var leftDoor = 0;
 var leftLight = 0;
 var leftDisabled = 0;
@@ -159,16 +157,11 @@ var gameEnd = false;
 // left door: closed door pounds it and drains power, open door jumpscares.
 var foxy = Foxy.create();
 
-var motioLeftDoor;
-
 // reset
 function reset() {
     // apply this night's difficulty row (clamped to 1-5; a saved night beyond
     // 5 is handled as game-complete by The End screen, not played)
     _nightDiff = _nightTable[night] || _nightTable[1];
-    jumpReady = false;
-    powerOutAttacked = false;
-    alreadyAttacked = false;
     rightDoor = 0;
     leftDoor = 0;
     power = 100;
@@ -194,7 +187,6 @@ function reset() {
     $('#ghost-overlay').removeClass('display-1 ghost-flash ghost-shock').addClass('display-0');
     $('.container').removeClass('ghost-shock-screen');
     $('#cam-fault-indicator').removeClass('display-1').addClass('display-0');
-    // location.replace('/index.html');
 }
 
 // Browsers block audio.play() until the user has interacted with the page.
@@ -418,7 +410,9 @@ function burnTime() {
 //update power image
 function updatePowerUsage() {
     powerUsage = leftDoor + rightDoor + rightLight + leftLight + cameraMode + 1;
-    $('#usage-counter img').attr('src', 'resources/img/game/batt_usage_'+powerUsage+'.png');
+    // the bar only has assets for levels 1-5; all-usage states (e.g. both doors
+    // + both lights + camera = 6) show the top bar instead of a missing image
+    $('#usage-counter img').attr('src', 'resources/img/game/batt_usage_'+Math.min(powerUsage, 5)+'.png');
 }
 
 
@@ -656,24 +650,6 @@ function foxyScare() {
 }
 
 
-function addNight() {
-    $('.container:not(#start-screen)').addClass('animate-out');
-    // change transition image
-    $('.transition img').src('resources')
-    // animate in transition screen
-
-
-}
-
-
-function powerOut() {
-
-}
-
-function playerWins() {
-
-}
-
 function muteCall() {
     $('#call'+night+'').get(0).pause();
     $('.mute-call').css('display', 'none');
@@ -683,7 +659,6 @@ function muteCall() {
 
 //all door activity
 //================
-var doorTimeout;
 // While the Door Ghost outage runs every electrical control is dead: the
 // doors freeze in their current state, the lights and camera cannot be
 // toggled. The error blip is the only feedback (same as a jammed switch).
@@ -721,9 +696,6 @@ function toggleDoor(location, door) {
     $('.door-sound').get(0).play();
     $('.' + location + '-switch > img').attr('src', 'resources/img/rooms/' + location + '_switch_door_' + door + '_light_' + ((location=='right') ? rightLight : leftLight) + '.png');
     $('.' + location + '-door > img').attr('src', 'resources/img/doors/' + location + '_door_' + door + '.gif');
-    //doorTimeout = setTimeout(function () {
-    //    $('.' + location + '-door > img').attr('src', 'resources/img/doors/' + location + '_door_' + ((door) ? 0 : 1) + '.png');
-    //}, 1000);
 }
 
 
@@ -1403,11 +1375,6 @@ function cameraToggle(ele) {
     $('.camera-cycle').get(0).play();
 }
 
-function playRandomSound() {
-    // play random sounds at random 1 night
-
-}
-
 function restart() {
     $("#game-start").get(0).pause();
     $("#ambience2").get(0).pause();
@@ -1561,12 +1528,5 @@ $('document').ready(function() {
     $('#power-repair-back button').click(function () {
         closePowerRepairScreen();
     })
-
-    //init door
-    //motioLeftDoor = new Motio($('.left-door')[0], {
-    //    fps: 29,
-    //    frames: 14,
-    //    vertical: true
-    //});
 
 });
