@@ -33,6 +33,7 @@ var order;
 var rooms = {
     '1a': { f: 1, c: 1, b: 1 },
     '1b': { f: 0, c: 0, b: 0, occupy: 0 },
+    '1c': { f: 0, c: 0, b: 0, occupy: 0 },
     '2a': { f: 0, c: 0, b: 0, occupy: 0 },
     '2b': { f: 0, c: 0, b: 0, occupy: 0 },
     '4a': { f: 0, c: 0, b: 0, occupy: 0 },
@@ -43,8 +44,6 @@ var rooms = {
     '7': { f: 0, c: 0, b: 0, occupy: 0 },
     'safe': { f: 0, c: 0, b: 0 }
 };
-var foxyStatus = 0;
-
 //time and power
 var _oneHour = 860; //ticks per hour
 var currentTime = 0;
@@ -57,11 +56,11 @@ var currentUsage = 0;
 // animatronics move more often (AI level), power drains faster, hours run
 // longer, and the Door Ghost appears more frequently.
 var _nightTable = {
-    1: { aiB: 2,  aiC: 1,  powerMult: 1.0, hourMult: 1.00, ghostFirst: [300, 600], ghostNext: [450, 900] },
-    2: { aiB: 4,  aiC: 3,  powerMult: 1.1, hourMult: 1.05, ghostFirst: [250, 500], ghostNext: [400, 750] },
-    3: { aiB: 6,  aiC: 5,  powerMult: 1.2, hourMult: 1.10, ghostFirst: [200, 450], ghostNext: [350, 650] },
-    4: { aiB: 8,  aiC: 7,  powerMult: 1.3, hourMult: 1.15, ghostFirst: [150, 350], ghostNext: [300, 550] },
-    5: { aiB: 10, aiC: 9,  powerMult: 1.4, hourMult: 1.20, ghostFirst: [100, 300], ghostNext: [250, 450] }
+    1: { aiB: 2,  aiC: 1,  aiF: 1, powerMult: 1.0, hourMult: 1.00, ghostFirst: [300, 600], ghostNext: [450, 900] },
+    2: { aiB: 4,  aiC: 3,  aiF: 2, powerMult: 1.1, hourMult: 1.05, ghostFirst: [250, 500], ghostNext: [400, 750] },
+    3: { aiB: 6,  aiC: 5,  aiF: 4, powerMult: 1.2, hourMult: 1.10, ghostFirst: [200, 450], ghostNext: [350, 650] },
+    4: { aiB: 8,  aiC: 7,  aiF: 5, powerMult: 1.3, hourMult: 1.15, ghostFirst: [150, 350], ghostNext: [300, 550] },
+    5: { aiB: 10, aiC: 9,  aiF: 7, powerMult: 1.4, hourMult: 1.20, ghostFirst: [100, 300], ghostNext: [250, 450] }
 };
 var _nightDiff = _nightTable[1]; // applied by reset() from the saved night
 
@@ -130,7 +129,20 @@ var _doorGhost = {
 
 var bonnie = new moveAI('Bonnie', 'b', 'left', 'resources/img/rooms/safe_room/bonnie_jumpscare.gif', ['1a', '1b', '3', '6', '5', '2b', 'safe']);
 var chick = new moveAI('Chick', 'c', 'right', 'resources/img/rooms/safe_room/chika_jumpscare.gif', ['1a', '1b', '7', '6', '4a', '4b', 'safe']);
+// Freddy: the slowest of the four — classic route through the kitchen to the
+// right door. Lowest AI level every night (aiF in the difficulty table).
+var freddy = new moveAI('Freddy', 'f', 'right', 'resources/img/rooms/safe_room/power_down_freddy_scare.gif', ['1a', '1b', '5', '6', '4a', '4b', 'safe']);
+// set when Freddy has entered the office (enterOffice clears his room flag,
+// so this flag is the only way to know he is inside for the power-out check)
+var freddyInOffice = false;
 var gameEnd = false;
+
+// ===== Foxy =====
+// Stage-based state machine (js/foxy.js — pure logic, unit-tested). Stage 1 =
+// Pirate Cove; watching the West Hall cam (2a) advances him, plus a rare
+// random creep when unwatched. Stage 4 = sprint down the West Hall to the
+// left door: closed door pounds it and drains power, open door jumpscares.
+var foxy = Foxy.create();
 
 var motioLeftDoor;
 
@@ -146,6 +158,8 @@ function reset() {
     leftDoor = 0;
     power = 100;
     cam1aClicks = 0;
+    freddyInOffice = false;
+    foxy = Foxy.create();
     // reset the ghost flicker system
     _ghostTick = 0;
     _ghost = { active: false, cooldown: 0, camUpTicks: 0, toggleTimes: [], broken: false, rebooting: false, rebootTicks: 0, lockTicks: 0, rebootWasBroken: false, rebootDone: false };
@@ -264,6 +278,8 @@ function initGameTime() {
         }
         bonnie.tick();
         chick.tick();
+        freddy.tick();
+        foxyTick();
     }, 100);
 }
 
@@ -277,44 +293,60 @@ function burnPower() {
         $('#power-counter').html(power);
         currentUsage = 0;
 
-        if (power == 0) {
-            console.log('GAME LOSE ->> Out of power');
-            gameEnd = true;
-            //deactive door
-            if (rightDoor) { rightDoor = 0; toggleDoor('right', rightDoor); }
-            if (leftDoor) { leftDoor = 0; toggleDoor('left', leftDoor); }
-            //power out
-            setTimeout(function () {
-                $('.to-hide').css('display', 'none');
-                $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_power_0.png');
-
-                $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
-                $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
-
-                $('#powerout-sound').get(0).play();
-                $('#call'+night+'').get(0).pause();
-                $('#game-start').get(0).pause();
-                $('#ambience2').get(0).pause();
-            }, 600);
-
-            setTimeout(function () {
-                $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_powerdown_foxy.gif');
-                $("#powerout-jingle").get(0).play();
-            }, 12000);
-
-            setTimeout(function () {
-                $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_powerdown_end.gif');
-                $("#powerout-jingle").get(0).pause();
-            }, 26000);
-
-            setTimeout(function() {
-                $('.main-screen').attr('src', 'resources/img/rooms/safe_room/power_down_freddy_scare.gif');
-                //play sounds
-                setTimeout(function () { $("#scare").get(0).play(); }, 600);
-                setTimeout(function () { $("#scare").get(0).pause(); restart(); }, 1000);
-            }, (28000 + (rnd(5)*1000)));
-        }
+        if (power == 0) { startPowerOut(); }
     }
+}
+
+// The power-out sequence. Called from burnPower when the last point of power
+// is used, and from foxyTick when a blocked Foxy sprint drains power to zero.
+function startPowerOut() {
+    console.log('GAME LOSE ->> Out of power');
+    gameEnd = true;
+    //deactive door
+    if (rightDoor) { rightDoor = 0; toggleDoor('right', rightDoor); }
+    if (leftDoor) { leftDoor = 0; toggleDoor('left', leftDoor); }
+    // If Freddy is near the office when the power dies, he appears in the
+    // dark office instead of the classic Foxy-run cutscene (checked once —
+    // the occupancy flags don't change after gameEnd).
+    var freddyNearOffice = rooms['4b'].f || freddyInOffice;
+    //power out
+    setTimeout(function () {
+        $('.to-hide').css('display', 'none');
+        $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_power_0.png');
+
+        $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
+        $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
+
+        $('#powerout-sound').get(0).play();
+        $('#call'+night+'').get(0).pause();
+        $('#game-start').get(0).pause();
+        $('#ambience2').get(0).pause();
+    }, 600);
+
+    if (freddyNearOffice) {
+        // Freddy in the dark office, then his jumpscare (no Foxy run)
+        setTimeout(function () {
+            $('.main-screen').attr('src', 'resources/img/rooms/safe_room/rightside_freddy_scare.gif');
+        }, 12000);
+    } else {
+        setTimeout(function () {
+            $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_powerdown_foxy.gif');
+            $("#powerout-jingle").get(0).play();
+        }, 12000);
+
+        setTimeout(function () {
+            $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_powerdown_end.gif');
+            $("#powerout-jingle").get(0).pause();
+        }, 26000);
+    }
+
+    // the power-out always ends with Freddy's jumpscare
+    setTimeout(function() {
+        $('.main-screen').attr('src', 'resources/img/rooms/safe_room/power_down_freddy_scare.gif');
+        //play sounds
+        setTimeout(function () { $("#scare").get(0).play(); }, 600);
+        setTimeout(function () { $("#scare").get(0).pause(); restart(); }, 1000);
+    }, (28000 + (rnd(5)*1000)));
 }
 
 //constant running night
@@ -372,6 +404,30 @@ function updatePowerUsage() {
 // forward along its fixed route if the roll is <= its AI level (per-night,
 // from the difficulty table). It never skips rooms or moves backward on its
 // own — the only backward move is the retreat after a blocked attack.
+// Shared jumpscare sequence: scare gif + scream, fade to static, then
+// restart. Used by the moveAI animatronics (which call it only when the
+// camera is down) and by Foxy (whose sprint can finish while the camera is
+// up, so he hides the camera overlay first).
+function doJumpscare(scareSrc) {
+    $('.to-hide').css('display', 'none');
+    $('.main-screen').attr('src', scareSrc);
+
+    $("#scare").get(0).play();
+    setTimeout(function () {
+        $("#scare").get(0).pause();
+        $('.camera-cycle').get(0).play();
+        $('.main-screen').attr('src', 'resources/img/game/transition-fade.gif');
+    }, 2000);
+
+    setTimeout(function () {
+        $('#gameover-static').get(0).play();
+        $('.main-screen').attr('src', 'resources/img/game/static.gif');
+    }, 2200);
+
+    gameEnd = true;
+    setTimeout(function () { restart(); }, 8000);
+}
+
 function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
     var checkIn = 39 + rnd(51); // 40-90 ticks (4-9s) until the first movement check
     var attackPower = 0;
@@ -385,10 +441,10 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
     var insideRoom = 0;
     var insideRoomPower = 0;
     var flipCam = 0;
-    var endGame = false;
 
     var tick = function () {
-        if (!endGame && !gameEnd) {
+        // a jumpscare sets gameEnd, which stops every animatronic
+        if (!gameEnd) {
             //check if in room
             if (insideRoom) {
                 if (flipCam) { scare(); }
@@ -432,7 +488,7 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
         // dice roll: advance only if the roll is <= this night's AI level
         // (read live from _nightDiff — the instances are built before reset()
         // applies the night, so a construction-time snapshot would be stale)
-        var level = (myId == 'b') ? _nightDiff.aiB : _nightDiff.aiC;
+        var level = { b: _nightDiff.aiB, c: _nightDiff.aiC, f: _nightDiff.aiF }[myId];
         if (rnd(20) > level) { return; }
         // forward one room only (never past the safe room)
         var newRoom = currentRoom + 1;
@@ -478,34 +534,18 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
         rooms[roomPath[currentRoom]][myId] = 0;
         rooms[roomPath[currentRoom]].occupy = 0;
 
-        if (myId == 'b') { leftDisabled = 1 }
-        if (myId == 'c') { rightDisabled = 1 }
+        if (scareDoor == 'left') { leftDisabled = 1 }
+        else { rightDisabled = 1 }
+        if (myId == 'f') { freddyInOffice = true }
         console.log(myName + ' inside office!');
     }
 
     var scare = function () {
+        // the office animatronics only scare when the camera is down — the
+        // camera overlay would cover the jumpscare
         if (!cameraMode) {
-            //set displays
-            $('.to-hide').css('display', 'none');
-            $('.main-screen').attr('src', scareScreen);
-
-            //play sounds
-            $("#scare").get(0).play();
-            setTimeout(function () {
-                $("#scare").get(0).pause();
-                $('.camera-cycle').get(0).play();
-                $('.main-screen').attr('src', 'resources/img/game/transition-fade.gif');
-            }, 2000);
-
-            setTimeout(function () {
-                $('#gameover-static').get(0).play();
-                $('.main-screen').attr('src', 'resources/img/game/static.gif');
-            }, 2200);
-
-            endGame = true;
-            gameEnd = true;
             console.log(myName + ' attacked!');
-            setTimeout(function() { restart(); }, 8000);
+            doJumpscare(scareScreen);
         }
     }
     return { tick: tick };
@@ -516,6 +556,68 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
 //create a random number
 function rnd(length) {
     return Math.floor((Math.random() * length) + 1);
+}
+
+// ===== Foxy game-loop adapter =====
+// Calls the pure Foxy state machine (js/foxy.js) once per tick and applies
+// its effects. All the stage/sprint rules live in the pure module; this is
+// only the glue to the DOM (images, sounds, power).
+function foxyTick() {
+    if (gameEnd) { return; }
+    var world = {
+        viewingWestHall: cameraMode && _currentImgRoom == '2a',
+        viewingCove: cameraMode && _currentImgRoom == '1c',
+        leftDoorClosed: !!leftDoor,
+        ghostHoldingLeft: doorGhostHolding('left'),
+        night: night,
+        rand: Math.random
+    };
+    var r = Foxy.tick(foxy, world);
+    foxy = r.state;
+    for (var i = 0; i < r.effects.length; i++) {
+        var fx = r.effects[i];
+        if (fx == 'sprint') {
+            console.log('Foxy is sprinting!');
+            // the West Hall camera shows the sprint animation while it is on
+            // screen (updateCamImg re-renders the room on each camera switch)
+            $('#foxy-run').get(0).currentTime = 0;
+            playSafe($('#foxy-run'));
+        }
+        else if (fx == 'pound') {
+            console.log('Foxy pounded the left door!');
+            $('#foxy-run').get(0).pause();
+            $('#foxy-pound').get(0).currentTime = 0;
+            playSafe($('#foxy-pound'));
+            // a blocked sprint costs real power — an instant hit, so it
+            // bypasses the currentUsage/burnPower model on purpose
+            power -= Foxy.POWER_DRAIN;
+            if (power < 0) { power = 0; }
+            $('#power-counter').html(power);
+            // drain to zero: the power-out sequence takes over
+            if (power == 0) { startPowerOut(); return; }
+            // if the player is watching the West Hall, refresh the feed —
+            // the hall is empty again (note: 2a uses .gif)
+            if (cameraMode && _currentImgRoom == '2a') { updateCamImg(_currentImgPath, _currentImgRoom, 'gif'); }
+        }
+        else if (fx == 'jumpscare') {
+            console.log('Foxy attacked!');
+            foxyScare();
+        }
+        // 'advance' and 'reset' need no DOM work — the cove camera is static
+    }
+    // keep the sprint animation on the West Hall feed while it runs
+    if (foxy.sprinting && cameraMode && _currentImgRoom == '2a') {
+        $('#camera-bg1 img').attr('src', 'resources/img/rooms/2a_west_hall/foxy_run.gif');
+    }
+}
+
+function foxyScare() {
+    $('#foxy-run').get(0).pause();
+    // the sprint can finish while the camera is up — hide the camera view so
+    // the jumpscare is not covered by the overlay (same as the power-out)
+    $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
+    $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
+    doJumpscare('resources/img/rooms/safe_room/left_door_foxy_scare.gif');
 }
 
 
@@ -1094,12 +1196,19 @@ function updateCamImg(path, room, filetype) {
         //check sounds
         if (rooms['6'].b) { $('#kitchen-b').get(0).play(); }
         else if (rooms['6'].c) { $('#kitchen-c').get(0).play(); }
+        else if (rooms['6'].f) { $('#kitchen-f').get(0).play(); }
     }
     else {
-        $('#camera-bg1 img').attr('src', _currentImgPath + 'b' + rooms[_currentImgRoom].b + '_c' + rooms[_currentImgRoom].c + '_f' + rooms[_currentImgRoom].f + '.' + extension);
+        // Freddy artwork (_f1) only exists for the Show Stage and Backstage;
+        // the other rooms fall back to the _f0 image so Freddy's presence
+        // never 404s a camera feed
+        var f = rooms[_currentImgRoom].f;
+        if (f && _currentImgRoom != '1a' && _currentImgRoom != '5') { f = 0; }
+        $('#camera-bg1 img').attr('src', _currentImgPath + 'b' + rooms[_currentImgRoom].b + '_c' + rooms[_currentImgRoom].c + '_f' + f + '.' + extension);
         //check sounds
         $('#kitchen-b').get(0).pause();
         $('#kitchen-c').get(0).pause();
+        $('#kitchen-f').get(0).pause();
     }
 }
 
@@ -1197,12 +1306,14 @@ $('document').ready(function() {
         cameraToggle(this);
     }),
     $('#cam1c').click(function () {
+        // track the cove as the current room so the game knows the player is
+        // viewing it (viewing the cove freezes Foxy's random creep); the feed
+        // itself is a single static image
+        _currentImgPath = 'resources/img/rooms/1c_pirate_cove/1c_';
+        _currentImgRoom = '1c';
         activeCamImg = 'resources/img/rooms/1c_pirate_cove/1c_b0_c0_f0.png';
-        $('#camera-id').html($(this).data('camname'));
         $('#camera-bg1 img').attr('src', activeCamImg);
-        $('.camera-menu ul li').removeClass('active');
-        $(this).parent().toggleClass('active');
-        $('.camera-cycle').get(0).play();
+        cameraToggle(this);
     }),
     $('#cam2a').click(function () {
         updateCamImg('resources/img/rooms/2a_west_hall/2a_', '2a', 'gif');
