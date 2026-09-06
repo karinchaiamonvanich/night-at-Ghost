@@ -127,6 +127,21 @@ var _doorGhost = {
     prevSafeC: 0
 };
 
+// ===== Power Outage system =====
+// When the Door Ghost is not driven away in time it leaps into the office and
+// kills the power for a while. The office goes dark, every electrical control
+// dies, and the player must restore power at the Fuse Box with a Dead by
+// Daylight–style timing minigame (js/power-repair.js). The animatronics keep
+// moving but wait at the doors while the power is out. If the power is not
+// restored within the pressure window, Freddy jumpscares.
+var _outagePressureTicks = 600; // 60s to restore power before Freddy jumpscares
+var _powerOutage = {
+    active: false,
+    frozenPower: 0,   // the real power value, frozen while the outage runs
+    pressure: 0,      // countdown to the Freddy jumpscare
+    repair: null      // PowerRepair state (created when the outage starts)
+};
+
 var bonnie = new moveAI('Bonnie', 'b', 'left', 'resources/img/rooms/safe_room/bonnie_jumpscare.gif', ['1a', '1b', '3', '6', '5', '2b', 'safe']);
 var chick = new moveAI('Chick', 'c', 'right', 'resources/img/rooms/safe_room/chika_jumpscare.gif', ['1a', '1b', '7', '6', '4a', '4b', 'safe']);
 // Freddy: the slowest of the four — classic route through the kitchen to the
@@ -167,6 +182,9 @@ function reset() {
     _moveSpeedMult = 1;
     // reset the door ghost system (rolls the first appearance interval)
     _doorGhost = { door: null, atDoorTicks: 0, holdTicks: 0, cooldown: 0, spawnIn: rndRange(_nightDiff.ghostFirst[0], _nightDiff.ghostFirst[1]), leftWait: 0, rightWait: 0, prevSafeB: 0, prevSafeC: 0 };
+    // reset the power outage system
+    _powerOutage = { active: false, frozenPower: 0, pressure: 0, repair: null };
+    $('#power-repair-screen').removeClass('display-1').addClass('display-0');
     $('#repair-screen').removeClass('display-1').addClass('display-0');
     $('#camera-repair').removeClass('display-1').addClass('display-0');
     $('#repair-state').empty();
@@ -273,6 +291,7 @@ function initGameTime() {
         if (!gameEnd) {
             burnTime();
             burnPower();
+            powerOutageTick();
             ghostTick();
             doorGhostTick();
         }
@@ -285,6 +304,9 @@ function initGameTime() {
 
 //logic to burn power
 function burnPower() {
+    // while the Door Ghost outage runs the power is frozen (the counter shows
+    // 0) — the power only moves when the player restores it at the Fuse Box
+    if (_powerOutage.active) { return; }
     var powerUsage = (leftDoor*2) + (rightDoor*2) + rightLight + leftLight + cameraMode + 1;
     currentUsage += powerUsage;
     // later nights drain power faster (shorter ticks-per-powerbar)
@@ -312,6 +334,7 @@ function startPowerOut() {
     //power out
     setTimeout(function () {
         $('.to-hide').css('display', 'none');
+        $('#fuse-box').css('display', 'none');
         $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_power_0.png');
 
         $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
@@ -363,6 +386,7 @@ function burnTime() {
             gameEnd = true;
             night++;
             $('.to-hide').css('display', 'none');
+            $('#fuse-box').css('display', 'none');
             $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
             $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
             $('.main-screen').attr('src', 'resources/img/game/5_to_6.gif');
@@ -410,6 +434,7 @@ function updatePowerUsage() {
 // up, so he hides the camera overlay first).
 function doJumpscare(scareSrc) {
     $('.to-hide').css('display', 'none');
+    $('#fuse-box').css('display', 'none'); // don't let the box float over the scare
     $('.main-screen').attr('src', scareSrc);
 
     $("#scare").get(0).play();
@@ -516,6 +541,12 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
             attackPower = 0;
             return;
         }
+        // the power is out: wait at the door until it is restored (no attack
+        // charge, no retreat) — the charge restarts from zero afterwards
+        if (_powerOutage.active) {
+            attackPower = 0;
+            return;
+        }
         if (!doorStatus) {
             console.log(myName + ' preparing to attack:', attackPower + '/' + maxAttackPower);
             attackPower += rnd(10);
@@ -589,12 +620,16 @@ function foxyTick() {
             $('#foxy-pound').get(0).currentTime = 0;
             playSafe($('#foxy-pound'));
             // a blocked sprint costs real power — an instant hit, so it
-            // bypasses the currentUsage/burnPower model on purpose
-            power -= Foxy.POWER_DRAIN;
-            if (power < 0) { power = 0; }
-            $('#power-counter').html(power);
-            // drain to zero: the power-out sequence takes over
-            if (power == 0) { startPowerOut(); return; }
+            // bypasses the currentUsage/burnPower model on purpose. While the
+            // Door Ghost outage runs the power is frozen, so the pound only
+            // resets Foxy (no drain, no power-out).
+            if (!_powerOutage.active) {
+                power -= Foxy.POWER_DRAIN;
+                if (power < 0) { power = 0; }
+                $('#power-counter').html(power);
+                // drain to zero: the power-out sequence takes over
+                if (power == 0) { startPowerOut(); return; }
+            }
             // if the player is watching the West Hall, refresh the feed —
             // the hall is empty again (note: 2a uses .gif)
             if (cameraMode && _currentImgRoom == '2a') { updateCamImg(_currentImgPath, _currentImgRoom, 'gif'); }
@@ -649,7 +684,18 @@ function muteCall() {
 //all door activity
 //================
 var doorTimeout;
+// While the Door Ghost outage runs every electrical control is dead: the
+// doors freeze in their current state, the lights and camera cannot be
+// toggled. The error blip is the only feedback (same as a jammed switch).
+function outageFreezeControls() {
+    if (_powerOutage.active) {
+        $('.door-light-disabled').get(0).play();
+        return true;
+    }
+    return false;
+}
 function toggleLeftDoor() {
+    if (outageFreezeControls()) { return; }
     if (!leftDisabled) {
         leftDoor ? leftDoor = 0 : leftDoor = 1;
         toggleDoor('left', leftDoor);
@@ -659,6 +705,7 @@ function toggleLeftDoor() {
 }
 
 function toggleRightDoor() {
+    if (outageFreezeControls()) { return; }
     if (!rightDisabled) {
         rightDoor ? rightDoor = 0 : rightDoor = 1;
         toggleDoor('right', rightDoor);
@@ -685,6 +732,7 @@ function toggleDoor(location, door) {
 //================
 function toggleLeftLight() {
     $('#left-light-toggle').click(function () {
+        if (outageFreezeControls()) { return; }
         if (!leftDisabled) {
             leftLight ? leftLight = 0 : leftLight = 1;
             processLightActivty(leftLight, 'left');
@@ -696,6 +744,7 @@ function toggleLeftLight() {
 
 function toggleRightLight() {
     $('#right-light-toggle').click(function () {
+        if (outageFreezeControls()) { return; }
         if (!rightDisabled) {
             rightLight ? rightLight = 0 : rightLight = 1;
             processLightActivty(rightLight, 'right');
@@ -737,6 +786,11 @@ function cameraState() {
     // while the ghost sequence is active the camera is locked down: the player
     // cannot raise or lower it until the ghost is gone (lock lifts with _ghost.active)
     if (_ghost.active) return;
+    // while the power is out the camera is dead: force it down if it was up
+    if (_powerOutage.active) {
+        if (cameraMode) { cameraDown(); }
+        return;
+    }
     clearTimeout(camTimeout);
     // count flips for the ghost "flipping too fast" trigger
     if (!_ghost.broken) { ghostRegisterToggle(); }
@@ -888,9 +942,10 @@ function doorGhostTick() {
             d.atDoorTicks = 0;
             d.holdTicks = 0;
             d.cooldown = _doorGhostCooldownTicks;
-            // same consequence as the camera-abuse Ghost: the existing sequence
-            // (guard: don't re-trigger it if the camera-abuse Ghost is already running)
-            if (!_ghost.active) { startGhostSequence(); }
+            // consequence: the office power dies until the player restores it
+            // at the Fuse Box (the pressure timer inside the outage is the
+            // fail state)
+            startPowerOutage();
         }
         return;
     }
@@ -899,9 +954,9 @@ function doorGhostTick() {
     if (d.cooldown > 0) { d.cooldown--; return; }
 
     // never appear while the existing Ghost sequence is running, the camera is
-    // broken, or a reboot is in progress (the game-ended flag already keeps
-    // this off during the power-out sequence and after 6 AM)
-    if (_ghost.active || _ghost.broken || _ghost.rebooting) return;
+    // broken, a reboot is in progress, or the power is out (the game-ended
+    // flag already keeps this off during the power-out sequence and after 6 AM)
+    if (_ghost.active || _ghost.broken || _ghost.rebooting || _powerOutage.active) return;
 
     if (d.spawnIn > 0) { d.spawnIn--; return; }
 
@@ -935,6 +990,135 @@ function doorGhostDoorFree(door) {
 // animatronic's attack at that door).
 function doorGhostHolding(door) {
     return _doorGhost.door == door;
+}
+
+// ===== Power Outage system =====
+// The Door Ghost's leap kills the power for a while. The office goes dark,
+// every electrical control freezes, and the player restores power at the Fuse
+// Box with the timing minigame (js/power-repair.js). The animatronics keep
+// moving but wait at the doors (see moveAI.attack). If the power is not
+// restored before the pressure timer runs out, Freddy jumpscares.
+function startPowerOutage() {
+    var o = _powerOutage;
+    o.active = true;
+    o.frozenPower = power;
+    o.pressure = _outagePressureTicks;
+    o.repair = PowerRepair.create();
+
+    // the power is frozen; the counter shows 0 (the real value is restored
+    // when the repair completes)
+    power = 0;
+    $('#power-counter').html(0);
+
+    // the camera is dead: force it down (also hides the Repair Screen, which
+    // lives in the camera view). A reboot in progress is cancelled — the
+    // camera stays broken (rebootable once the power is back) and the
+    // reactive-reboot side effects (cooldown / speed boost) never apply.
+    clearTimeout(camTimeout);
+    if (_ghost.rebooting) {
+        _ghost.rebooting = false;
+        _ghost.rebootWasBroken = false;
+        clearInterval(_brokenCamTimer);
+        _brokenCamTimer = null;
+    }
+    if (cameraMode) { cameraDown(); }
+
+    // the office goes dark (the doors keep their frozen state in the image)
+    $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_power_0.png');
+    updatePowerRepairUi();
+    console.log('POWER OUTAGE — restore the power at the fuse box!');
+}
+
+// Runs once per game tick while the outage is active: the pressure countdown
+// and the minigame marker (it keeps moving even while the repair screen is
+// closed).
+function powerOutageTick() {
+    var o = _powerOutage;
+    // a win (6 AM) can flip gameEnd earlier in this same tick — don't run the
+    // pressure death on top of the win sequence
+    if (!o.active || gameEnd) { return; }
+
+    o.pressure--;
+    if (o.pressure <= 0) {
+        // the power never came back: Freddy in the dark office, then scare
+        console.log('GAME LOSE ->> Outage pressure ran out');
+        o.active = false;
+        gameEnd = true;
+        $('#power-repair-screen').removeClass('display-1').addClass('display-0');
+        $('#fuse-box').css('display', 'none');
+        $('.main-screen').attr('src', 'resources/img/rooms/safe_room/rightside_freddy_scare.gif');
+        setTimeout(function () {
+            doJumpscare('resources/img/rooms/safe_room/power_down_freddy_scare.gif');
+        }, 4000);
+        return;
+    }
+
+    var r = PowerRepair.tick(o.repair, { speed: PowerRepair.SPEED });
+    o.repair = r.state;
+    updatePowerRepairUi();
+}
+
+// The Fuse Box opens the repair screen (the screen can be closed and reopened
+// without losing progress).
+function openPowerRepairScreen() {
+    if (!_powerOutage.active) { return; }
+    $('#power-repair-screen').removeClass('display-0').addClass('display-1');
+    updatePowerRepairUi();
+}
+
+function closePowerRepairScreen() {
+    if (!_powerOutage.active) { return; }
+    $('#power-repair-screen').removeClass('display-1').addClass('display-0');
+}
+
+// One minigame press: a hit advances the progress, a miss resets it, and the
+// third hit restores the power.
+function powerRepairPress() {
+    var o = _powerOutage;
+    if (!o.active) { return; }
+    var r = PowerRepair.press(o.repair, { zoneStart: PowerRepair.ZONE_START, zoneEnd: PowerRepair.ZONE_END });
+    o.repair = r.state;
+    if (r.result == 'complete') {
+        endPowerOutage();
+    } else {
+        updatePowerRepairUi();
+    }
+}
+
+// Power restored: the frozen value comes back, the office re-renders, and the
+// controls thaw (doors resume from their frozen state, animatronics resume
+// their attack charge from zero).
+function endPowerOutage() {
+    var o = _powerOutage;
+    o.active = false;
+    o.repair = null;
+    power = o.frozenPower;
+    $('#power-counter').html(power);
+    updatePowerUsage();
+    $('#power-repair-screen').removeClass('display-1').addClass('display-0');
+    // re-render the office (lights/doors are back to their frozen state)
+    processLightActivty(leftLight, 'left');
+    console.log('Power restored!');
+}
+
+// Render the minigame: marker position, the three progress pips, the pressure
+// countdown, and the BACK control.
+function updatePowerRepairUi() {
+    var o = _powerOutage;
+    var $bar = $('#power-repair-bar');
+    if (!o.active) {
+        $bar.find('.pr-marker').css('left', '0%');
+        $bar.find('.pr-zone').css('left', '0%').css('width', '0%');
+        $bar.find('.pr-pip').removeClass('pr-on');
+        $('#power-repair-state').html('');
+        return;
+    }
+    $bar.find('.pr-zone').css('left', PowerRepair.ZONE_START + '%').css('width', (PowerRepair.ZONE_END - PowerRepair.ZONE_START) + '%');
+    $bar.find('.pr-marker').css('left', o.repair.pos + '%');
+    $bar.find('.pr-pip').each(function (i) {
+        if (i < o.repair.progress) { $(this).addClass('pr-on'); } else { $(this).removeClass('pr-on'); }
+    });
+    $('#power-repair-state').html('POWER RESTORED IN ' + Math.ceil(o.pressure / 10) + 's');
 }
 
 function startGhostSequence() {
@@ -1361,6 +1545,21 @@ $('document').ready(function() {
     // BACK on the Repair Screen (guarded inside closeRepairScreen)
     $('#repair-back button').click(function () {
         closeRepairScreen();
+    }),
+
+    // the Fuse Box opens the Power Repair screen (guarded inside openPowerRepairScreen)
+    $('#fuse-box').click(function () {
+        openPowerRepairScreen();
+    }),
+
+    // the PRESS control on the Power Repair screen: one minigame press
+    $('#power-repair-press').click(function () {
+        powerRepairPress();
+    }),
+
+    // BACK on the Power Repair screen (progress is kept; the marker keeps moving)
+    $('#power-repair-back button').click(function () {
+        closePowerRepairScreen();
     })
 
     //init door
