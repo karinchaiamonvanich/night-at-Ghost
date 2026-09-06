@@ -169,19 +169,38 @@ function reset() {
 // The game auto-starts on load (no gesture on this document), so play() can
 // reject with NotAllowedError. playSafe() swallows that rejection and retries
 // on the first user interaction, so the error never shows up in the console.
+//
+// IMPORTANT: the unlock must retry EVERY audio element, not just the one that
+// rejected — the browser's autoplay policy unlocks the whole page on one
+// gesture, and any element that was never .play()ed before that gesture
+// (e.g. the office ambience when the player never clicked the start screen)
+// would otherwise stay silent forever.
 var _audioUnlocked = false;
+function unlockAllAudio() {
+    if (_audioUnlocked) return;
+    _audioUnlocked = true;
+    // retry every element that already had a play() attempt (marked by
+    // playSafe) — not just the one that rejected — so nothing that was
+    // supposed to be playing stays silent
+    $('audio').each(function () {
+        var el = this;
+        if (el._playRequested && el.paused && !el.ended) {
+            el.play().catch(function () {});
+        }
+    });
+    if (_ghostAudioCtx && _ghostAudioCtx.state === 'suspended') { _ghostAudioCtx.resume(); }
+}
 function playSafe($el) {
     var el = $el.get(0);
     if (!el) return;
+    el._playRequested = true;
     var p = el.play();
     if (p && typeof p.catch === 'function') {
         p.catch(function (err) {
             if (err && err.name === 'NotAllowedError') {
                 if (_audioUnlocked) return;
-                _audioUnlocked = true;
                 var unlock = function () {
-                    el.play().catch(function () {});
-                    if (_ghostAudioCtx && _ghostAudioCtx.state === 'suspended') { _ghostAudioCtx.resume(); }
+                    unlockAllAudio();
                     document.removeEventListener('click', unlock);
                     document.removeEventListener('keydown', unlock);
                     document.removeEventListener('touchstart', unlock);
