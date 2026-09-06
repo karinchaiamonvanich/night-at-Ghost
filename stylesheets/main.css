@@ -10,6 +10,16 @@ html, body {
     margin: 0;
     padding: 0;
     background-color: #000;
+    /* No accidental text selection or image dragging anywhere on the page. */
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+img {
+    -webkit-user-drag: none;
+    user-select: none;
 }
 
 .preloader img {
@@ -752,6 +762,40 @@ h1 {
 #repair-back {
     position: absolute;
     bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* ===== The End screen (game complete after Night 5) =====
+   Full-screen black, above the game but below the ghost flicker overlay
+   (10000) so a Ghost scare can still show through. */
+#the-end {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    z-index: 9500;
+    text-align: center;
+    color: #fff;
+}
+
+#the-end h1 {
+    position: absolute;
+    top: 42%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Press Start 2P', cursive;
+    font-size: 48px;
+    color: #fff;
+    text-shadow: 0 0 10px #fff, 0 0 24px rgba(255, 255, 255, 0.5);
+    letter-spacing: 4px;
+}
+
+#play-again {
+    position: absolute;
+    top: 62%;
     left: 50%;
     transform: translateX(-50%);
 }

@@ -44,13 +44,29 @@ var rooms = {
     'safe': { f: 0, c: 0, b: 0 }
 };
 var foxyStatus = 0;
-var levelCode = Math.floor((Math.random() * 10) + 1); // random 1 to 10 ** how fast the anematronics move in seconds
 
 //time and power
 var _oneHour = 860; //ticks per hour
 var currentTime = 0;
 var _perPowerUsage = 150; //ticks per powerbar
 var currentUsage = 0;
+
+// ===== Per-night difficulty =====
+// One table keyed by night (1-5). Read once when the night starts (reset());
+// nothing mid-night depends on it. Later nights are strictly harder:
+// animatronics move more often (AI level), power drains faster, hours run
+// longer, and the Door Ghost appears more frequently.
+var _nightTable = {
+    1: { aiB: 2,  aiC: 1,  powerMult: 1.0, hourMult: 1.00, ghostFirst: [300, 600], ghostNext: [450, 900] },
+    2: { aiB: 4,  aiC: 3,  powerMult: 1.1, hourMult: 1.05, ghostFirst: [250, 500], ghostNext: [400, 750] },
+    3: { aiB: 6,  aiC: 5,  powerMult: 1.2, hourMult: 1.10, ghostFirst: [200, 450], ghostNext: [350, 650] },
+    4: { aiB: 8,  aiC: 7,  powerMult: 1.3, hourMult: 1.15, ghostFirst: [150, 350], ghostNext: [300, 550] },
+    5: { aiB: 10, aiC: 9,  powerMult: 1.4, hourMult: 1.20, ghostFirst: [100, 300], ghostNext: [250, 450] }
+};
+var _nightDiff = _nightTable[1]; // applied by reset() from the saved night
+
+// random integer in the inclusive range [min, max] (ticks)
+function rndRange(min, max) { return min + rnd(max - min); }
 
 //cameraState
 var _currentImgPath = 'resources/img/rooms/1a_show_stage/cam_1a_';
@@ -70,10 +86,10 @@ var _ghostCooldownTicks = 1200; // 2min before it can trigger again
 var _ghostFlashHoldMs = 350;    // how long the full flash holds before fading out
 var _ghostFadeMs = 150;         // fade-out wait (covers the overlay's 0.12s opacity transition)
 var _ghostTick = 0;
-// Ghost Speed Boost: multiplier on the animatronics' room-to-room movement
-// accumulation. 1 = normal, 2 = the danger window after a Ghost hit. Fixed
-// (never stacks); reset to 1 when the ghost sequence ends (the reboot-
-// completion reset remains as a backstop).
+// Ghost Speed Boost: divisor on the animatronics' movement-check interval.
+// 1 = normal, 2 = the danger window after a Ghost hit (they roll to move
+// twice as often). Fixed (never stacks); reset to 1 when the ghost sequence
+// ends (the reboot-completion reset remains as a backstop).
 var _moveSpeedMult = 1;
 var _ghost = {
     active: false,
@@ -96,10 +112,6 @@ var _brokenCamTimer = null;
 // by holding the matching light on for 5s; if it is not driven away within 10s
 // it leaps into the office and runs the existing Ghost penalty sequence. It
 // has its own cooldown, separate from the camera-abuse Ghost's.
-var _doorGhostSpawnFirstMin = 300;   // 30s: earliest first appearance
-var _doorGhostSpawnFirstMax = 600;   // 60s: latest first appearance
-var _doorGhostSpawnMin = 450;        // 45s: earliest re-appearance
-var _doorGhostSpawnMax = 900;        // 90s: latest re-appearance
 var _doorGhostHoldTicks = 50;        // 5s of continuous light to drive it away
 var _doorGhostAtDoorTicks = 100;     // 10s at the door before it leaps in
 var _doorGhostCooldownTicks = 2100;  // 3min 30s before it can appear again
@@ -124,6 +136,9 @@ var motioLeftDoor;
 
 // reset
 function reset() {
+    // apply this night's difficulty row (clamped to 1-5; a saved night beyond
+    // 5 is handled as game-complete by The End screen, not played)
+    _nightDiff = _nightTable[night] || _nightTable[1];
     jumpReady = false;
     powerOutAttacked = false;
     alreadyAttacked = false;
@@ -137,7 +152,7 @@ function reset() {
     _repairMode = 0;
     _moveSpeedMult = 1;
     // reset the door ghost system (rolls the first appearance interval)
-    _doorGhost = { door: null, atDoorTicks: 0, holdTicks: 0, cooldown: 0, spawnIn: _doorGhostSpawnFirstMin + rnd(_doorGhostSpawnFirstMax - _doorGhostSpawnFirstMin), leftWait: 0, rightWait: 0, prevSafeB: 0, prevSafeC: 0 };
+    _doorGhost = { door: null, atDoorTicks: 0, holdTicks: 0, cooldown: 0, spawnIn: rndRange(_nightDiff.ghostFirst[0], _nightDiff.ghostFirst[1]), leftWait: 0, rightWait: 0, prevSafeB: 0, prevSafeC: 0 };
     $('#repair-screen').removeClass('display-1').addClass('display-0');
     $('#camera-repair').removeClass('display-1').addClass('display-0');
     $('#repair-state').empty();
@@ -237,7 +252,8 @@ function initGameTime() {
 function burnPower() {
     var powerUsage = (leftDoor*2) + (rightDoor*2) + rightLight + leftLight + cameraMode + 1;
     currentUsage += powerUsage;
-    if (currentUsage >= _perPowerUsage) {
+    // later nights drain power faster (shorter ticks-per-powerbar)
+    if (currentUsage >= _perPowerUsage / _nightDiff.powerMult) {
         power -= 1;
         $('#power-counter').html(power);
         currentUsage = 0;
@@ -285,7 +301,8 @@ function burnPower() {
 //constant running night
 function burnTime() {
     currentTime += 1;
-    if (currentTime >= _oneHour) {
+    // later nights run longer hours (more ticks per hour)
+    if (currentTime >= _oneHour * _nightDiff.hourMult) {
         hour++;
         $('#hour-counter').html(hour);
         currentTime = 0;
@@ -310,9 +327,15 @@ function burnTime() {
             localStorage.setItem('night', String(night));
             localStorage.removeItem('timesPlayed');
             localStorage.setItem('timesPlayed', String(timesPlayed));
-            setTimeout(function() {
-                location.reload();
-            }, 10000);
+
+            // Surviving Night 5 completes the game: The End instead of a Night 6
+            if (night > 5) {
+                setTimeout(function () { showTheEnd(); }, 10000);
+            } else {
+                setTimeout(function() {
+                    location.reload();
+                }, 10000);
+            }
         }
     }
 }
@@ -325,9 +348,13 @@ function updatePowerUsage() {
 
 
 //default movingAI
+// Original-game style movement: every 4-9s (halved while the Ghost Speed
+// Boost is active) the animatronic rolls a 1-20 die and advances ONE room
+// forward along its fixed route if the roll is <= its AI level (per-night,
+// from the difficulty table). It never skips rooms or moves backward on its
+// own — the only backward move is the retreat after a blocked attack.
 function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
-    var movePower = 0;
-    var maxMovePower = 2000;
+    var checkIn = 39 + rnd(51); // 40-90 ticks (4-9s) until the first movement check
     var attackPower = 0;
     var maxAttackPower = 300;
     var roomPath = paraPath;
@@ -343,10 +370,6 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
 
     var tick = function () {
         if (!endGame && !gameEnd) {
-            // _moveSpeedMult doubles room-to-room movement while the Ghost Speed
-            // Boost is active (a fixed 2x, never stacked); it does not affect
-            // the attack charge or the in-office scare charge below.
-            movePower += rnd(20) * _moveSpeedMult;
             //check if in room
             if (insideRoom) {
                 if (flipCam) { scare(); }
@@ -359,45 +382,55 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
             else if (roomPath[currentRoom] == 'safe') {
                 attack();
             }
-            else if (movePower >= maxMovePower) {
-                move();
+            else {
+                // _moveSpeedMult halves the check interval while the Ghost Speed
+                // Boost is active (a fixed 2x, never stacked); it does not
+                // affect the attack charge or the in-office scare charge.
+                checkIn--;
+                if (checkIn <= 0) {
+                    checkIn = (39 + rnd(51)) / _moveSpeedMult;
+                    move();
+                }
             }
         }
     }
 
+    // transfer this animatronic to a new room on its path and play the move sound
+    var goTo = function (newRoom) {
+        rooms[roomPath[currentRoom]][myId] = 0;
+        rooms[roomPath[currentRoom]].occupy = 0;
+        currentRoom = newRoom;
+        rooms[roomPath[currentRoom]][myId] = 1;
+        rooms[roomPath[currentRoom]].occupy = 1;
+        $('#move-sound').get(0).pause();
+        $('#move-sound').get(0).currentTime = 0;
+        $('#move-sound').get(0).play();
+    }
+
     var move = function () {
-        toMove = rnd(10);
-        newRoom = rnd((roomPath.length - 2));
-        //if (toMove == 1 && (currentRoom < (roomPath.length-1))) {
-        if (toMove == 1) {
-            //when beside safe force new room to be safe
-            if (currentRoom == (roomPath.length - 2)) {
-                newRoom = (roomPath.length - 1);
-            }
+        // watching this animatronic's room on a camera freezes it
+        if (cameraMode && (_currentImgRoom == roomPath[currentRoom])) { console.log(myName + ' is frozen by the camera'); return; }
+        // dice roll: advance only if the roll is <= this night's AI level
+        // (read live from _nightDiff — the instances are built before reset()
+        // applies the night, so a construction-time snapshot would be stale)
+        var level = (myId == 'b') ? _nightDiff.aiB : _nightDiff.aiC;
+        if (rnd(20) > level) { return; }
+        // forward one room only (never past the safe room)
+        var newRoom = currentRoom + 1;
+        if (newRoom >= roomPath.length) { return; }
+        if (rooms[roomPath[newRoom]].occupy) { return; } // target occupied: wait for the next check
+        goTo(newRoom);
+        console.log(myName + ' moved to', roomPath[currentRoom]);
+    }
 
-            if ((!rooms[roomPath[newRoom]].occupy) && !(cameraMode && (_currentImgRoom == roomPath[currentRoom])) && !(cameraMode && (_currentImgRoom == roomPath[newRoom]))) {
-
-                //clear current and move to new room
-                rooms[roomPath[currentRoom]][myId] = 0;
-                rooms[roomPath[currentRoom]].occupy = 0;
-                //update current room
-                currentRoom = newRoom;
-                rooms[roomPath[currentRoom]][myId] = 1;
-                rooms[roomPath[currentRoom]].occupy = 1;
-                //play sound
-                $('#move-sound').get(0).pause();
-                $('#move-sound').get(0).currentTime = 0;
-                $('#move-sound').get(0).play();
-                movePower = 0;
-
-                //if (cameraMode) { updateCamImg(_currentImgPath, _currentImgRoom); }
-                console.log(myName + ' moved to', roomPath[currentRoom]);
-            }
-            else {
-                if (cameraMode && (_currentImgRoom == roomPath[currentRoom])) { movePower = 0; console.log(myName + ' move power reset to 0'); }
-                else { move(); }
-            }
-        }
+    // retreat to a random earlier room on the route (only ever called from the
+    // safe room; never forward, never the door room)
+    var retreat = function () {
+        var newRoom = rnd(currentRoom) - 1; // 0..currentRoom-1
+        if (rooms[roomPath[newRoom]].occupy) { return; }
+        if (cameraMode && (_currentImgRoom == roomPath[newRoom])) { return; }
+        goTo(newRoom);
+        console.log(myName + ' retreated to', roomPath[currentRoom]);
     }
 
     var attack = function () {
@@ -416,7 +449,7 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
         else {
             console.log(myName + ' attack is blocked');
             attackPower = 0;
-            if (rnd(5) == 5) { move(); }
+            if (rnd(5) == 5) { retreat(); }
         }
     }
 
@@ -721,7 +754,7 @@ function doorGhostTick() {
             d.door = null;
             d.atDoorTicks = 0;
             d.holdTicks = 0;
-            d.spawnIn = _doorGhostSpawnMin + rnd(_doorGhostSpawnMax - _doorGhostSpawnMin);
+            d.spawnIn = rndRange(_nightDiff.ghostNext[0], _nightDiff.ghostNext[1]);
             // the ghost is gone: refresh the office view (the light may still be on)
             processLightActivty((goneDoor == 'left') ? leftLight : rightLight, goneDoor);
             return;
@@ -757,7 +790,7 @@ function doorGhostTick() {
     var door = doorGhostDoorFree(first) ? first : (doorGhostDoorFree(second) ? second : null);
     if (!door) {
         // neither door is free: cancel this appearance and roll a fresh interval
-        d.spawnIn = _doorGhostSpawnMin + rnd(_doorGhostSpawnMax - _doorGhostSpawnMin);
+        d.spawnIn = rndRange(_nightDiff.ghostNext[0], _nightDiff.ghostNext[1]);
         return;
     }
     d.door = door;
@@ -1089,8 +1122,47 @@ function restart() {
     return;
 }
 
+// The End: shown after surviving Night 5 (or when a saved night is already
+// beyond 5). Black screen + "THE END" + Play Again, which resets the save to
+// Night 1 and returns to the start screen. The win sounds are played by the
+// caller (burnTime already plays them on a Night-5 win; the startup guard
+// plays them when loading an already-complete save).
+function showTheEnd() {
+    gameEnd = true;
+    $('.to-hide').css('display', 'none');
+    $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
+    $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
+    $('.main-screen').attr('src', 'resources/img/game/5_to_6.gif');
+    $('#the-end').removeClass('display-0').addClass('display-1');
+}
+
+// Play Again: reset the save to Night 1 and return to the start screen.
+function playAgain() {
+    localStorage.setItem('night', '1');
+    location.href = 'index.html';
+}
+
 $('document').ready(function() {
     console.log('DOM is loaded...');
+
+    // Never let a game image be picked up and dragged (CSS also blocks this;
+    // this is the JS backstop).
+    $(document).on('dragstart', function (e) { e.preventDefault(); });
+
+    // A saved night beyond 5 means the game is already complete: show The End
+    // instead of starting a phantom Night 6. We skip transitionScreen() (which
+    // would start a phantom Night 6), so hide the preloader/transition and
+    // reveal the container here — they are normally hidden by transitionScreen.
+    if (night > 5) {
+        reset();
+        $('.preloader').css('display', 'none');
+        $('.transition').css('display', 'none');
+        $('.container:not(#start-screen)').css('opacity', '1');
+        showTheEnd();
+        playSafe($('#win-sound'));
+        setTimeout(function () { playSafe($('#win-cheer')); }, 2000);
+        return;
+    }
 
     reset();
     // show which night and game start
