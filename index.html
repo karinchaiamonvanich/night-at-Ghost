@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="icon" href="favicon.ico">
+    <title>One Night at Greddy's</title>
+    <link href="https://fonts.googleapis.com/css?family=Press+Start+2P&subset=latin,greek" rel="stylesheet" type="text/css">
+    <link rel="stylesheet" href="stylesheets/main.css">
+</head>
+<body>
+    <div class="container" id="start-screen">
+        <div class="static"></div>
+        <div class="start">
+            <audio preload="auto" id="menu-start" src="resources/audio/darkness%20music.wav" loop="loop"></audio>
+            <aside class="menu">
+                <h1>One<br> Night <br>at<br> Nui's</h1>
+                <a href="main.html" id="start-game" onclick="javascript:night=1;">Start Game</a>
+                <a href="main.html" id="continue-game" class="display-0">Continue <p>Night <span id="night-no">2</span></p></a>
+                <div class="volume-control">
+                    <span class="volume-label">Vol</span>
+                    <button id="vol-down" type="button">-</button>
+                    <span id="vol-value">100%</span>
+                    <button id="vol-up" type="button">+</button>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="js/jquery-2.2.4.js"></script>
+    <script type="text/javascript" src="js/scratch-js.js"></script>
+    <script>
+        $(document).ready(function() {
+            console.log("Sound is playing?");
+            var m = $("#menu-start").get(0);
+            var p = m.play();
+            if (p && typeof p.catch === 'function') {
+                p.catch(function (err) {
+                    if (err && err.name === 'NotAllowedError') {
+                        var unlock = function () {
+                            m.play().catch(function () {});
+                            document.removeEventListener('click', unlock);
+                            document.removeEventListener('keydown', unlock);
+                            document.removeEventListener('touchstart', unlock);
+                        };
+                        document.addEventListener('click', unlock);
+                        document.addEventListener('keydown', unlock);
+                        document.addEventListener('touchstart', unlock);
+                    }
+                });
+            }
+
+            // show continue?
+            var getNight = localStorage.getItem('night');
+            var getTimesPlayed = localStorage.getItem('timesPlayed');
+
+            if (parseInt(getTimesPlayed) > 0) {
+                $('#night-no').html(getNight);
+                $('#continue-game').removeClass('display-0');
+            }
+
+            // volume control (0-100, step 5, persisted to localStorage)
+            var VOL_STEP = 5;
+            var vol = parseInt(localStorage.getItem('volume'), 10);
+            if (isNaN(vol) || vol < 0 || vol > 100) vol = 100;
+
+            function applyVolume() {
+                m.volume = vol / 100;
+                $('#vol-value').html(vol + '%');
+            }
+
+            function setVolume(next) {
+                if (next < 0) next = 0;
+                if (next > 100) next = 100;
+                vol = next;
+                localStorage.setItem('volume', vol);
+                applyVolume();
+            }
+
+            $('#vol-up').on('click', function () { setVolume(vol + VOL_STEP); });
+            $('#vol-down').on('click', function () { setVolume(vol - VOL_STEP); });
+
+            applyVolume();
+        });
+    </script>
+</body>
+</html>

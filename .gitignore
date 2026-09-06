@@ -1,0 +1,11 @@
+# dev/AI tooling — not part of the game
+.claude/
+.agents/
+.scratch/
+CLAUDE.md
+CONTEXT.md
+security.md
+skills-lock.json
+docs/
+context/
+debug.log
