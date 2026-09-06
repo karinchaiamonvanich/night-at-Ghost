@@ -260,6 +260,13 @@ function boostGhostAudio() {
     });
 }
 
+// The "you survived" jingle: chimes, then a crowd cheer. Played when a night
+// is won (burnTime) and when The End screen is shown (beginGame).
+function playWinJingle() {
+    playSafe($('#win-sound'));
+    setTimeout(function () { playSafe($('#win-cheer')); }, 2000);
+}
+
 function gamestart() {
     boostGhostAudio();
     initGameTime();
@@ -274,6 +281,19 @@ function gamestart() {
     $("#game-start")[0].volume = 0.3 * (masterVolume / 100);
     playSafe($("#game-start"));
     playSafe($("#ambience2"));
+
+    // Schedule the "Hello?" voiceover relative to gamestart (not page load),
+    // so it fires after the Click-to-Start gesture has unlocked audio. The
+    // offset reproduces the original page-load timing: night 1's gamestart runs
+    // 24.9s in (voiceover was 27s from load → 2.1s after gamestart); nights 2+
+    // start immediately (voiceover was 4s from load → 4s after).
+    var voiceoverDelay = (night === 1) ? 2100 : 4000;
+    if (night >= 1 && night < 6) {
+        setTimeout(function () {
+            playSafe($('#call' + night + ''));
+            $('.mute-call').fadeIn();
+        }, voiceoverDelay);
+    }
 }
 
 
@@ -332,7 +352,7 @@ function startPowerOut() {
         $('.camera-menu').removeClass('display-0, display-1').addClass('display-0');
         $('#camera-bg2 img').removeClass('display-0, display-1').addClass('display-0');
 
-        $('#powerout-sound').get(0).play();
+        playSafe($('#powerout-sound'));
         $('#call'+night+'').get(0).pause();
         $('#game-start').get(0).pause();
         $('#ambience2').get(0).pause();
@@ -346,7 +366,7 @@ function startPowerOut() {
     } else {
         setTimeout(function () {
             $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_powerdown_foxy.gif');
-            $("#powerout-jingle").get(0).play();
+            playSafe($("#powerout-jingle"));
         }, 12000);
 
         setTimeout(function () {
@@ -359,7 +379,7 @@ function startPowerOut() {
     setTimeout(function() {
         $('.main-screen').attr('src', 'resources/img/rooms/safe_room/power_down_freddy_scare.gif');
         //play sounds
-        setTimeout(function () { $("#scare").get(0).play(); }, 600);
+        setTimeout(function () { playSafe($("#scare")); }, 600);
         setTimeout(function () { $("#scare").get(0).pause(); restart(); }, 1000);
     }, (28000 + (rnd(5)*1000)));
 }
@@ -387,8 +407,7 @@ function burnTime() {
             if (night < 6) {
                 $('#call'+night+'').get(0).pause();
             }
-            $('#win-sound').get(0).play();
-            setTimeout(function () { $('#win-cheer').get(0).play(); }, 2000);
+            playWinJingle();
             ++timesPlayed;
             console.log(timesPlayed);
             localStorage.setItem('night', String(night));
@@ -431,15 +450,15 @@ function doJumpscare(scareSrc) {
     $('#fuse-box').css('display', 'none'); // don't let the box float over the scare
     $('.main-screen').attr('src', scareSrc);
 
-    $("#scare").get(0).play();
+    playSafe($("#scare"));
     setTimeout(function () {
         $("#scare").get(0).pause();
-        $('.camera-cycle').get(0).play();
+        playSafe($('.camera-cycle'));
         $('.main-screen').attr('src', 'resources/img/game/transition-fade.gif');
     }, 2000);
 
     setTimeout(function () {
-        $('#gameover-static').get(0).play();
+        playSafe($('#gameover-static'));
         $('.main-screen').attr('src', 'resources/img/game/static.gif');
     }, 2200);
 
@@ -498,7 +517,7 @@ function moveAI(paraName, paraID, paraDoor, paraScare, paraPath) {
         rooms[roomPath[currentRoom]].occupy = 1;
         $('#move-sound').get(0).pause();
         $('#move-sound').get(0).currentTime = 0;
-        $('#move-sound').get(0).play();
+        playSafe($('#move-sound'));
     }
 
     var move = function () {
@@ -664,7 +683,7 @@ function muteCall() {
 // toggled. The error blip is the only feedback (same as a jammed switch).
 function outageFreezeControls() {
     if (_powerOutage.active) {
-        $('.door-light-disabled').get(0).play();
+        playSafe($('.door-light-disabled'));
         return true;
     }
     return false;
@@ -675,7 +694,7 @@ function toggleLeftDoor() {
         leftDoor ? leftDoor = 0 : leftDoor = 1;
         toggleDoor('left', leftDoor);
     } else if (leftDisabled) {
-        $('.door-light-disabled').get(0).play();
+        playSafe($('.door-light-disabled'));
     }
 }
 
@@ -685,7 +704,7 @@ function toggleRightDoor() {
         rightDoor ? rightDoor = 0 : rightDoor = 1;
         toggleDoor('right', rightDoor);
     } else if (rightDisabled) {
-        $('.door-light-disabled').get(0).play();
+        playSafe($('.door-light-disabled'));
     }
 }
 
@@ -693,7 +712,7 @@ function toggleDoor(location, door) {
     updatePowerUsage();
     $('.door-sound').get(0).pause();
     $('.door-sound').get(0).currentTime = 0;
-    $('.door-sound').get(0).play();
+    playSafe($('.door-sound'));
     $('.' + location + '-switch > img').attr('src', 'resources/img/rooms/' + location + '_switch_door_' + door + '_light_' + ((location=='right') ? rightLight : leftLight) + '.png');
     $('.' + location + '-door > img').attr('src', 'resources/img/doors/' + location + '_door_' + door + '.gif');
 }
@@ -709,7 +728,7 @@ function toggleLeftLight() {
             leftLight ? leftLight = 0 : leftLight = 1;
             processLightActivty(leftLight, 'left');
         } else if (leftDisabled) {
-            $('.door-light-disabled').get(0).play();
+            playSafe($('.door-light-disabled'));
         }
     });
 }
@@ -721,7 +740,7 @@ function toggleRightLight() {
             rightLight ? rightLight = 0 : rightLight = 1;
             processLightActivty(rightLight, 'right');
         } else if (rightDisabled) {
-            $('.door-light-disabled').get(0).play();
+            playSafe($('.door-light-disabled'));
         }
     });
 }
@@ -732,7 +751,7 @@ function processLightActivty(state, pos) {
         else { $('.right-switch > img').attr('src', 'resources/img/rooms/right_switch_door_' + rightDoor + '_light_' + rightLight + '.png'); }
 
         updatePowerUsage();
-        state ? $(".light-on").get(0).play() : $(".light-on").get(0).pause();
+        state ? playSafe($(".light-on")) : $(".light-on").get(0).pause();
 
         if ((pos == 'left') && state && doorGhostHolding('left')) { $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_ghost_left_door_scare.png'); }
         else if ((pos == 'right') && state && doorGhostHolding('right')) { $('.main-screen').attr('src', 'resources/img/rooms/safe_room/safe_room_ghost_right_door_scare.png'); }
@@ -770,7 +789,7 @@ function cameraState() {
     updatePowerUsage();
     $('.camera-toggle').get(0).pause();
     $('.camera-toggle').get(0).currentTime = 0;
-    $('.camera-toggle').get(0).play();
+    playSafe($('.camera-toggle'));
 }
 
 function cameraUp() {
@@ -1350,9 +1369,9 @@ function updateCamImg(path, room, filetype) {
     if (room == '6') {
         $('#camera-bg1 img').attr('src', _currentImgPath);
         //check sounds
-        if (rooms['6'].b) { $('#kitchen-b').get(0).play(); }
-        else if (rooms['6'].c) { $('#kitchen-c').get(0).play(); }
-        else if (rooms['6'].f) { $('#kitchen-f').get(0).play(); }
+        if (rooms['6'].b) { playSafe($('#kitchen-b')); }
+        else if (rooms['6'].c) { playSafe($('#kitchen-c')); }
+        else if (rooms['6'].f) { playSafe($('#kitchen-f')); }
     }
     else {
         // Freddy artwork (_f1) only exists for the Show Stage and Backstage;
@@ -1372,7 +1391,7 @@ function cameraToggle(ele) {
     $('#camera-id').html($(ele).data('camname'));
     $('.camera-menu ul li').removeClass('active');
     $(ele).parent().toggleClass('active');
-    $('.camera-cycle').get(0).play();
+    playSafe($('.camera-cycle'));
 }
 
 function restart() {
@@ -1428,24 +1447,48 @@ $('document').ready(function() {
     // this is the JS backstop).
     $(document).on('dragstart', function (e) { e.preventDefault(); });
 
-    // A saved night beyond 5 means the game is already complete: show The End
-    // instead of starting a phantom Night 6. We skip transitionScreen() (which
-    // would start a phantom Night 6), so hide the preloader/transition and
-    // reveal the container here — they are normally hidden by transitionScreen.
-    if (night > 5) {
+    // The game does not start until the player interacts with THIS document.
+    // Browsers block audio.play() until a gesture occurs on the current page,
+    // and the "Start Game" click happened on index.html — so main.html has no
+    // gesture of its own. The Click-to-Start overlay is that gesture: the first
+    // click (or Enter/Space) unlocks audio, then the transition/gamestart begin.
+    function beginGame() {
+        // A saved night beyond 5 means the game is already complete: show The
+        // End instead of starting a phantom Night 6. We skip transitionScreen()
+        // (which would start a phantom Night 6), so hide the preloader/transition
+        // and reveal the container here — they are normally hidden by
+        // transitionScreen.
+        if (night > 5) {
+            reset();
+            $('.preloader').css('display', 'none');
+            $('.transition').css('display', 'none');
+            $('.container:not(#start-screen)').css('opacity', '1');
+            showTheEnd();
+            playWinJingle();
+            return;
+        }
+
         reset();
-        $('.preloader').css('display', 'none');
-        $('.transition').css('display', 'none');
-        $('.container:not(#start-screen)').css('opacity', '1');
-        showTheEnd();
-        playSafe($('#win-sound'));
-        setTimeout(function () { playSafe($('#win-cheer')); }, 2000);
-        return;
+        // show which night and game start
+        transitionScreen(night);
     }
 
-    reset();
-    // show which night and game start
-    transitionScreen(night);
+    var gameStarted = false;
+    function startOnGesture() {
+        if (gameStarted) return;
+        gameStarted = true;
+        // this click/keypress is the page's first gesture — unlock audio now,
+        // so the transition/gamestart sounds that fire right after can play
+        unlockAllAudio();
+        $('#click-to-start').css('display', 'none');
+        beginGame();
+    }
+    $('#click-to-start').on('click', startOnGesture);
+    $(document).on('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+            startOnGesture();
+        }
+    });
 
     $('#cam1a').click(function () {
         updateCamImg('resources/img/rooms/1a_show_stage/cam_1a_', '1a');

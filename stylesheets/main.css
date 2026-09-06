@@ -925,3 +925,42 @@ h1 {
     left: 50%;
     transform: translateX(-50%);
 }
+
+/* Click-to-Start gate: full-screen black, above everything (z-index higher
+   than the preloader's 999999) so it is the first thing the player sees and
+   the only thing they can click. Hidden once the game starts. */
+#click-to-start {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    z-index: 1000000;
+    text-align: center;
+    color: #fff;
+    cursor: pointer;
+}
+
+#click-to-start h1 {
+    position: absolute;
+    top: 46%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Press Start 2P', cursive;
+    font-size: 40px;
+    color: #fff;
+    text-shadow: 0 0 10px #fff, 0 0 24px rgba(255, 255, 255, 0.5);
+    letter-spacing: 4px;
+}
+
+#click-to-start p {
+    position: absolute;
+    top: 58%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Press Start 2P', cursive;
+    font-size: 14px;
+    color: #888;
+    letter-spacing: 2px;
+}

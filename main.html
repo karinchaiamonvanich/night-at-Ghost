@@ -47,6 +47,16 @@
         <img src="resources/img/game/preloader.png" alt="">
     </div>
 
+    <!-- Click-to-Start gate: browsers block audio.play() until the user
+         interacts with THIS document. The "Start Game" click happened on
+         index.html, so main.html has no gesture of its own. This overlay is
+         the single gate: the first click (or Enter/Space) unlocks audio and
+         only then does the transition/gamestart begin. -->
+    <div id="click-to-start">
+        <h1>CLICK TO START</h1>
+        <p>or press ENTER</p>
+    </div>
+
     <!-- main -->
     <div class="container">
 
@@ -222,19 +232,9 @@
         var getNight = parseInt(localStorage.getItem('night'));
         night = getNight || 1;
         $('#night-counter').html(night);
-
-        if (night <= 1) {
-            setTimeout(function() {
-                playSafe($('#call'+night+''));
-                $('.mute-call').fadeIn();
-            }, 27000);
-        }
-        if (night >= 2 && night < 6) {
-            setTimeout(function() {
-                playSafe($('#call'+night+''));
-                $('.mute-call').fadeIn();
-            }, 4000);
-        }
+        // The voiceover ("Hello?") is scheduled from gamestart() in app.js,
+        // not here: it must fire relative to when the game actually begins
+        // (after the Click-to-Start gesture), not relative to page load.
     </script>
 </body>
 </html>
